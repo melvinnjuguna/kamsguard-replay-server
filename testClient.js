@@ -6,7 +6,7 @@
 
 import { netVuHttpGet } from "./src/utils/netvuClient.js";
 
-const DEVICE_IP = "192.168.1.50";
+const DEVICE_IP = "192.168.1.75";
 
 console.log("Testing NetVu HTTP Client");
 console.log("=========================\n");

@@ -1,9 +1,12 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 
 import { getDb } from "./db.js";
 import StreamManager from "./src/services/streamManager.js";
 import { checkFFmpegAvailable } from "./src/services/videoConverter.js";
+import { testConnection } from "./src/services/storageService.js";
+import { startSyncScheduler } from "./src/services/syncService.js";
 
 import camerasRouter from "./src/routes/cameras.js";
 import vpartsRouter from "./src/routes/vparts.js";
@@ -14,6 +17,12 @@ import healthRouter from "./src/routes/health.js";
 
 const app = express();
 const streamManager = new StreamManager({ maxStreams: 100 });
+
+// ── devices to sync ───────────────────────────────────────────────────────────
+const SYNC_DEVICES = [
+  { deviceIp: "192.168.1.75", cameras: [1] },
+  { deviceIp: "192.168.1.70", cameras: [1] }
+];
 
 app.use(cors({ origin: "http://localhost:4200", credentials: true }));
 app.use(express.json());
@@ -45,16 +54,18 @@ app.use("/api", streamRouter);
 
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
-  res
-    .status(500)
-    .json({ error: "Internal server error", details: err.message });
+  res.status(500).json({ error: "Internal server error", details: err.message });
 });
 
+let stopSync = null;
+
 process.on("SIGINT", () => {
+  if (stopSync) stopSync();
   streamManager.cleanup();
   setTimeout(() => process.exit(0), 1000);
 });
 process.on("SIGTERM", () => {
+  if (stopSync) stopSync();
   streamManager.cleanup();
   setTimeout(() => process.exit(0), 1000);
 });
@@ -67,8 +78,15 @@ app.listen(PORT, async () => {
     await getDb();
     console.log("✅ Database ready");
   } catch (err) {
-    console.error("❌ Database init failed:", err);
+    console.error("❌ Database init failed:", err.message);
     process.exit(1);
+  }
+
+  try {
+    await testConnection();
+    console.log("✅ IONOS storage ready");
+  } catch (err) {
+    console.error("❌ IONOS storage connection failed:", err.message);
   }
 
   const ffmpegOk = await checkFFmpegAvailable();
@@ -77,6 +95,10 @@ app.listen(PORT, async () => {
       ? "✅ FFmpeg available"
       : "⚠️  FFmpeg not found — video conversion disabled",
   );
+
+  // Start sync scheduler — 5 minutes for testing
+  stopSync = startSyncScheduler(SYNC_DEVICES, 15 * 60 * 1000);
+  console.log("✅ Sync scheduler started");
 
   console.log(`
 📺 Replay (proxy — adhbinary → MJPEG):
